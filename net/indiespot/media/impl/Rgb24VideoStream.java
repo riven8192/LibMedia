@@ -54,7 +54,7 @@ public class Rgb24VideoStream extends VideoStream {
 	protected void runReadLoop(Pool<ByteBuffer> pool, SimpleBlockingQueue<ByteBuffer> frameQueue) {
 
 		/*
-		 * Using DataInputStream(ffmpeg.stdin, 64*1024) instead of
+		 * Using DataInputStream(ffmpeg.stdin).readFully(byte[64*1024]) instead of
 		 * DataInputStream(BufferedInputStream(ffmpeg.stdin, 64*1024)) as it is
 		 * about 50x slower... ~8ms vs. ~330ms per frame. wtf?!
 		 */

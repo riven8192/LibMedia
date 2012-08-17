@@ -196,8 +196,8 @@ public abstract class VideoPlayback implements Closeable {
 			if (System.nanoTime() > secondStarted + 1000_000_000L) {
 				videoRenderer.setStats(//
 				   +videoFramerate + "fps " + //
-				      "(receiving: " + (videoStream.frameReadingTime / 1000000L) + "ms, " + //
-				      "rendering: " + (frameRenderTime / 1000000L) + "ms)");
+				      "(receiving: " + (videoStream.frameReadingTime / 1000_000L) + "ms, " + //
+				      "rendering: " + (frameRenderTime / 1000_000L) + "ms)");
 				videoFramerate = 0;
 				secondStarted += 1000_000_000L;
 			}

@@ -39,10 +39,13 @@ import org.lwjgl.BufferUtils;
 import org.lwjgl.LWJGLException;
 import org.lwjgl.opengl.Display;
 import org.lwjgl.opengl.DisplayMode;
+import org.lwjgl.opengl.GLContext;
 
 import craterstudio.math.EasyMath;
 
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL15.*;
+import static org.lwjgl.opengl.GL21.*;
 
 public class OpenGLVideoRenderer implements VideoRenderer {
 	private final String windowTitle;
@@ -67,6 +70,30 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 		} catch (LWJGLException exc) {
 			throw new IllegalStateException(exc);
 		}
+
+		//
+
+		textures = new int[2];
+		for (int i = 0; i < textures.length; i++) {
+			textures[i] = glGenTextures();
+			glBindTexture(GL_TEXTURE_2D, textures[i]);
+
+			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+			int wPot = EasyMath.fitInPowerOfTwo(w);
+			int hPot = EasyMath.fitInPowerOfTwo(h);
+			wRatio = (float) w / wPot;
+			hRatio = (float) h / hPot;
+
+			// 'tmpbuf' should be null, but some drivers are too buggy
+			ByteBuffer tmpbuf = BufferUtils.createByteBuffer(wPot * hPot * 3);
+			glTexImage2D(GL_TEXTURE_2D, 0/* level */, GL_RGB, wPot, hPot, 0/* border */, GL_RGB, GL_UNSIGNED_BYTE, tmpbuf);
+		}
+
+		this.pboAllowed = GLContext.getCapabilities().OpenGL21;
 	}
 
 	@Override
@@ -79,9 +106,52 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 		Display.setTitle(windowTitle + " - OpenGL - " + stats);
 	}
 
-	float wRatio, hRatio;
+	private float wRatio, hRatio;
 	private int[] textures = null;
 	private int textureIndex = 0;
+
+	void enablePBO() {
+		if (!this.pboAllowed) {
+			return;
+		}
+
+		if (pboHandle != 0) {
+			throw new IllegalStateException();
+		}
+
+		pboHandle = glGenBuffers();
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboHandle);
+		glBufferData(GL_PIXEL_UNPACK_BUFFER, w * h * 3, GL_STREAM_DRAW);
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+		System.out.println("Enabled PBO.");
+	}
+
+	boolean isUsingPBO() {
+		return this.pboHandle != 0;
+	}
+
+	void disablePBO() {
+		if (!this.pboAllowed) {
+			return;
+		}
+
+		if (pboHandle == 0) {
+			throw new IllegalStateException();
+		}
+
+		glDeleteBuffers(pboHandle);
+		pboHandle = 0;
+		System.out.println("Disabled PBO.");
+	}
+
+	private static final int PBO_SELF_MEASURE_INTERVAL = 10;
+	private long texTook;
+	private long pboTook;
+	private boolean pboAllowed;
+	private int pboMeasureIndex;
+	private int pboHandle;
+	private ByteBuffer pboBuffer;
 
 	@Override
 	public void render(ByteBuffer rgb) {
@@ -90,7 +160,7 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 			throw new IllegalStateException(rgb.remaining() + " <> " + (w * h * 3));
 		}
 
-		if (textures == null || Display.wasResized()) {
+		if (dw == 0 || Display.wasResized()) {
 
 			dw = Display.getWidth();
 			dh = Display.getHeight();
@@ -114,39 +184,44 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		glEnable(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, textures[textureIndex & 1]);
 
-		if (textures == null) {
-			textures = new int[2];
+		if (pboHandle == 0) {
+			long t0 = System.nanoTime();
+			glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+			long t1 = System.nanoTime();
+			texTook += t1 - t0;
+		} else {
+			long t0 = System.nanoTime();
+			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboHandle);
 
-			for (int i = 0; i < textures.length; i++) {
-				textures[i] = glGenTextures();
-				glBindTexture(GL_TEXTURE_2D, textures[i]);
+			pboBuffer = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY, pboBuffer);
+			pboBuffer.put(rgb);
+			pboBuffer.flip();
+			rgb.flip();
+			glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
-				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, 0);
+			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+			long t1 = System.nanoTime();
+			pboTook += t1 - t0;
+		}
 
-				int wPot = EasyMath.fitInPowerOfTwo(w);
-				int hPot = EasyMath.fitInPowerOfTwo(h);
-				wRatio = (float) w / wPot;
-				hRatio = (float) h / hPot;
-
-				// 'tmpbuf' should be null, but some drivers are too buggy
-				ByteBuffer tmpbuf = BufferUtils.createByteBuffer(wPot * hPot * 3);
-				glTexImage2D(GL_TEXTURE_2D, 0/* level */, GL_RGB, wPot, hPot, 0/* border */, GL_RGB, GL_UNSIGNED_BYTE, tmpbuf);
+		pboMeasureIndex++;
+		if (pboMeasureIndex == 1 * PBO_SELF_MEASURE_INTERVAL) {
+			this.enablePBO();
+		} else if (pboMeasureIndex == 2 * PBO_SELF_MEASURE_INTERVAL) {
+			System.out.println("\ttexTook: " + texTook / 1000 / PBO_SELF_MEASURE_INTERVAL + " micros");
+			System.out.println("\tpboTook: " + pboTook / 1000 / PBO_SELF_MEASURE_INTERVAL + " micros");
+			if (texTook < pboTook) {
+				this.disablePBO();
+			} else {
+				System.out.println("Keeping PBO.");
 			}
 		}
 
-		{
-			glBindTexture(GL_TEXTURE_2D, textures[textureIndex]);
-
-			glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb);
-		}
-
-		textureIndex += 1;
-		textureIndex %= textures.length;
-		glBindTexture(GL_TEXTURE_2D, textures[textureIndex]);
+		// bind the other texture, that has been filled in the previous frame
+		glBindTexture(GL_TEXTURE_2D, textures[++textureIndex & 1]);
 
 		glColor3f(1, 1, 1);
 		glBegin(GL_QUADS);
