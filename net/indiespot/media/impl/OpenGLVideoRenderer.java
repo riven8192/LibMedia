@@ -40,8 +40,11 @@ import org.lwjgl.LWJGLException;
 import org.lwjgl.opengl.Display;
 import org.lwjgl.opengl.DisplayMode;
 import org.lwjgl.opengl.GLContext;
+import org.lwjgl.opengl.PixelFormat;
 
+import craterstudio.bytes.NativeHacks;
 import craterstudio.math.EasyMath;
+import craterstudio.text.TextValues;
 
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL15.*;
@@ -54,19 +57,54 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 		this.windowTitle = windowTitle;
 	}
 
-	private int w, h;
-	private int dw, dh;
+	//
+
+	private boolean fullscreen;
+
+	public void setFullscreen(boolean fullscreen) {
+		this.fullscreen = fullscreen;
+	}
+
+	//
+
+	private boolean vsync;
+
+	public void setVSync(boolean vsync) {
+		this.vsync = vsync;
+	}
+
+	//
+
+	private boolean renderRotatingQuad;
+
+	public void setRenderRotatingQuad(boolean renderRotatingQuad) {
+		this.renderRotatingQuad = renderRotatingQuad;
+	}
+
+	//
+
+	private int videoWidth, videoHeight;
+	private int displayWidth, displayHeight;
 
 	@Override
 	public void init(VideoMetadata metadata) {
-		this.w = metadata.width;
-		this.h = metadata.height;
+		this.videoWidth = metadata.width;
+		this.videoHeight = metadata.height;
 
 		try {
-			Display.setDisplayMode(new DisplayMode(w, h));
+			if (!fullscreen) {
+				Display.setDisplayMode(new DisplayMode(videoWidth, videoHeight));
+			}
 			Display.setResizable(true);
 			Display.setTitle(windowTitle);
-			Display.create();
+			Display.setVSyncEnabled(this.vsync);
+			Display.setFullscreen(this.fullscreen);
+			try {
+				Display.create(new PixelFormat(/* bpp */32, /* alpha */8, /* depth */24,/* stencil */8,/* samples */4));
+			} catch (LWJGLException exc) {
+				System.out.println("Failed to create Display with 4 samples");
+				Display.create(new PixelFormat());
+			}
 		} catch (LWJGLException exc) {
 			throw new IllegalStateException(exc);
 		}
@@ -83,10 +121,10 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-			int wPot = EasyMath.fitInPowerOfTwo(w);
-			int hPot = EasyMath.fitInPowerOfTwo(h);
-			wRatio = (float) w / wPot;
-			hRatio = (float) h / hPot;
+			int wPot = EasyMath.fitInPowerOfTwo(videoWidth);
+			int hPot = EasyMath.fitInPowerOfTwo(videoHeight);
+			texWidthUsedRatio = (float) videoWidth / wPot;
+			texHeightUsedRatio = (float) videoHeight / hPot;
 
 			// 'tmpbuf' should be null, but some drivers are too buggy
 			ByteBuffer tmpbuf = BufferUtils.createByteBuffer(wPot * hPot * 3);
@@ -94,6 +132,9 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 		}
 
 		this.pboAllowed = GLContext.getCapabilities().OpenGL21;
+		System.out.println("PBO allowed: " + (this.pboAllowed ? "yes" : "no"));
+		
+		this.enablePBO();
 	}
 
 	@Override
@@ -106,7 +147,7 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 		Display.setTitle(windowTitle + " - OpenGL - " + stats);
 	}
 
-	private float wRatio, hRatio;
+	private float texWidthUsedRatio, texHeightUsedRatio;
 	private int[] textures = null;
 	private int textureIndex = 0;
 
@@ -121,7 +162,7 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 
 		pboHandle = glGenBuffers();
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboHandle);
-		glBufferData(GL_PIXEL_UNPACK_BUFFER, w * h * 3, GL_STREAM_DRAW);
+		glBufferData(GL_PIXEL_UNPACK_BUFFER, videoWidth * videoHeight * 3, GL_STREAM_DRAW);
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
 		System.out.println("Enabled PBO.");
@@ -145,74 +186,52 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 		System.out.println("Disabled PBO.");
 	}
 
-	private static final int PBO_SELF_MEASURE_INTERVAL = 10;
-	private long texTook;
-	private long pboTook;
+	private static final int PBO_SELF_MEASURE_INTERVAL = 100000000;
+	private long texTook, pboTook;
 	private boolean pboAllowed;
-	private int pboMeasureIndex;
+	private int pboIndex;
 	private int pboHandle;
 	private ByteBuffer pboBuffer;
+	private int currentFrameTexture;
 
-	@Override
-	public void render(ByteBuffer rgb) {
-
-		if (rgb.remaining() != w * h * 3) {
-			throw new IllegalStateException(rgb.remaining() + " <> " + (w * h * 3));
+	private void updateTexture(ByteBuffer rgb) {
+		if (rgb.remaining() != videoWidth * videoHeight * 3) {
+			throw new IllegalStateException(rgb.remaining() + " <> " + (videoWidth * videoHeight * 3));
 		}
 
-		if (dw == 0 || Display.wasResized()) {
-
-			dw = Display.getWidth();
-			dh = Display.getHeight();
-
-			glMatrixMode(GL_PROJECTION);
-			glLoadIdentity();
-			{
-				// coordinate system a la Java2D
-				glScalef(2.0f, -2.0f, 1.0f);
-				glTranslatef(-0.5f, -0.5f, 0);
-				glScalef(1.0f / dw, 1.0f / dh, 1.0f);
-			}
-
-			glMatrixMode(GL_MODELVIEW);
-			glLoadIdentity();
-
-			glViewport(0, 0, dw, dh);
-		}
-
-		glClearColor(0, 0, 0, 1);
-		glClear(GL_COLOR_BUFFER_BIT);
-
-		glEnable(GL_TEXTURE_2D);
-		glBindTexture(GL_TEXTURE_2D, textures[textureIndex & 1]);
-
+		long t0 = System.nanoTime();
 		if (pboHandle == 0) {
-			long t0 = System.nanoTime();
-			glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb);
-			long t1 = System.nanoTime();
-			texTook += t1 - t0;
+
+			glBindTexture(GL_TEXTURE_2D, textures[textureIndex & 1]);
+			glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, videoWidth, videoHeight, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+
 		} else {
-			long t0 = System.nanoTime();
 			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboHandle);
 
 			pboBuffer = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY, pboBuffer);
+			//System.out.println(NativeHacks.getBufferAddress(pboBuffer));
 			pboBuffer.put(rgb);
 			pboBuffer.flip();
 			rgb.flip();
 			glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
-			glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, 0);
+			glBindTexture(GL_TEXTURE_2D, textures[textureIndex & 1]);
+			glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, videoWidth, videoHeight, GL_RGB, GL_UNSIGNED_BYTE, 0);
 			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-			long t1 = System.nanoTime();
+		}
+		long t1 = System.nanoTime();
+
+		if (pboHandle == 0) {
+			texTook += t1 - t0;
+		} else {
 			pboTook += t1 - t0;
 		}
 
-		pboMeasureIndex++;
-		if (pboMeasureIndex == 1 * PBO_SELF_MEASURE_INTERVAL) {
+		if (++pboIndex == 1 * PBO_SELF_MEASURE_INTERVAL) {
 			this.enablePBO();
-		} else if (pboMeasureIndex == 2 * PBO_SELF_MEASURE_INTERVAL) {
-			System.out.println("\ttexTook: " + texTook / 1000 / PBO_SELF_MEASURE_INTERVAL + " micros");
-			System.out.println("\tpboTook: " + pboTook / 1000 / PBO_SELF_MEASURE_INTERVAL + " micros");
+		} else if (pboIndex == 2 * PBO_SELF_MEASURE_INTERVAL) {
+			System.out.println("\ttex updates took: " + TextValues.formatNumber(texTook / 1000000.0 / PBO_SELF_MEASURE_INTERVAL, 2) + " ms");
+			System.out.println("\tpbo updates took: " + TextValues.formatNumber(pboTook / 1000000.0 / PBO_SELF_MEASURE_INTERVAL, 2) + " ms");
 			if (texTook < pboTook) {
 				this.disablePBO();
 			} else {
@@ -220,45 +239,107 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 			}
 		}
 
-		// bind the other texture, that has been filled in the previous frame
-		glBindTexture(GL_TEXTURE_2D, textures[++textureIndex & 1]);
-
-		glColor3f(1, 1, 1);
-		glBegin(GL_QUADS);
-		{
-			int wQuad = dw;
-			int hQuad = Math.round(wQuad * ((float) h / w));
-
-			if (hQuad > dh) {
-				hQuad = dh;
-				wQuad = Math.round(hQuad * ((float) w / h));
-			}
-
-			if (wQuad > dw) {
-				wQuad = dw;
-				hQuad = Math.round(wQuad * ((float) h / w));
-			}
-
-			int xQuad = (dw - wQuad) / 2;
-			int yQuad = (dh - hQuad) / 2;
-			this.renderQuad(xQuad, yQuad, wQuad, hQuad);
+		// bind the texture, that has been filled in the previous frame (if any)
+		if (textureIndex++ == 0) {
+			currentFrameTexture = textures[0];
+		} else {
+			currentFrameTexture = textures[textureIndex & 1];
 		}
-		glEnd();
+	}
 
-		Display.update();
+	@Override
+	public void render(ByteBuffer rgb) {
+
+		if (displayWidth == 0 || Display.wasResized()) {
+
+			displayWidth = Display.getWidth();
+			displayHeight = Display.getHeight();
+
+			glMatrixMode(GL_PROJECTION);
+			glLoadIdentity();
+			{
+				// coordinate system a la Java2D
+				glScalef(2.0f, -2.0f, 1.0f);
+				glTranslatef(-0.5f, -0.5f, 0);
+				glScalef(1.0f / displayWidth, 1.0f / displayHeight, 1.0f);
+			}
+
+			glMatrixMode(GL_MODELVIEW);
+			glLoadIdentity();
+
+			glViewport(0, 0, displayWidth, displayHeight);
+		}
+
+		glClearColor(0, 0, 0, 1);
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		if (rgb != null) {
+			this.updateTexture(rgb);
+		}
+
+		// render video
+		{
+			glEnable(GL_TEXTURE_2D);
+			glBindTexture(GL_TEXTURE_2D, this.currentFrameTexture);
+
+			glColor3f(1, 1, 1);
+			glBegin(GL_QUADS);
+			{
+				int wQuad = displayWidth;
+				int hQuad = Math.round(wQuad * ((float) videoHeight / videoWidth));
+
+				if (hQuad > displayHeight) {
+					hQuad = displayHeight;
+					wQuad = Math.round(hQuad * ((float) videoWidth / videoHeight));
+				}
+
+				if (wQuad > displayWidth) {
+					wQuad = displayWidth;
+					hQuad = Math.round(wQuad * ((float) videoHeight / videoWidth));
+				}
+
+				int xQuad = (displayWidth - wQuad) / 2;
+				int yQuad = (displayHeight - hQuad) / 2;
+				this.renderQuad(xQuad, yQuad, wQuad, hQuad);
+			}
+			glEnd();
+			glDisable(GL_TEXTURE_2D);
+		}
+
+		if (renderRotatingQuad) {
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+			glPushMatrix();
+			glScalef(32, 32, 1);
+			glTranslatef((float) Math.sqrt(2.0), (float) Math.sqrt(2.0), 0);
+			glRotatef((float) (System.nanoTime() / 1_000_000_000.0 * 360 * 0.1), 0, 0, 1);
+
+			glColor4f(1, 1, 1, 0.25f);
+			glBegin(GL_QUADS);
+			glVertex2f(-1, -1);
+			glVertex2f(+1, -1);
+			glVertex2f(+1, +1);
+			glVertex2f(-1, +1);
+			glEnd();
+
+			glPopMatrix();
+
+			glDisable(GL_BLEND);
+		}
 	}
 
 	private void renderQuad(int x, int y, int w, int h) {
-		glTexCoord2f(0 * wRatio, 0 * hRatio);
+		glTexCoord2f(0 * texWidthUsedRatio, 0 * texHeightUsedRatio);
 		glVertex2f(x + 0, y + 0);
 
-		glTexCoord2f(1 * wRatio, 0 * hRatio);
+		glTexCoord2f(1 * texWidthUsedRatio, 0 * texHeightUsedRatio);
 		glVertex2f(x + w, y + 0);
 
-		glTexCoord2f(1 * wRatio, 1 * hRatio);
+		glTexCoord2f(1 * texWidthUsedRatio, 1 * texHeightUsedRatio);
 		glVertex2f(x + w, y + h);
 
-		glTexCoord2f(0 * wRatio, 1 * hRatio);
+		glTexCoord2f(0 * texWidthUsedRatio, 1 * texHeightUsedRatio);
 		glVertex2f(x + 0, y + h);
 	}
 

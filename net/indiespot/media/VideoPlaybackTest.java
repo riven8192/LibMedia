@@ -44,8 +44,17 @@ class VideoPlaybackTest {
 
 		File movieFile = new File(args[0]);
 
+		boolean audioEnabled = true;
+
 		VideoRenderer videoRenderer = new OpenGLVideoRenderer(movieFile.getName());
-		AudioRenderer audioRenderer = new OpenALAudioRenderer();
+		AudioRenderer audioRenderer = audioEnabled ? new OpenALAudioRenderer() : null;
+
+		if (videoRenderer instanceof OpenGLVideoRenderer) {
+			OpenGLVideoRenderer opengl = (OpenGLVideoRenderer) videoRenderer;
+			opengl.setFullscreen(false);
+			opengl.setVSync(true);
+			opengl.setRenderRotatingQuad(true);
+		}
 
 		VideoPlayback playback = new FFmpegVideoPlayback(movieFile);
 		playback.startVideo(videoRenderer, audioRenderer);

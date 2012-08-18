@@ -35,11 +35,12 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.regex.Pattern;
 
 import net.indiespot.media.Extractor;
 import craterstudio.io.Streams;
 import craterstudio.streams.NullOutputStream;
-import craterstudio.text.Text;
+import craterstudio.text.RegexUtil;
 import craterstudio.text.TextValues;
 
 public class FFmpeg {
@@ -88,23 +89,10 @@ public class FFmpeg {
 				// ----------------------------------------------------------^
 
 				if (line.trim().startsWith("Stream #") && line.contains("Video:")) {
-					framerate = Float.parseFloat(Text.afterLast(Text.before(line, "tbr,").trim(), ", ").trim());
-
-					for (String part : Text.split(Text.remove(line, ','), ' ')) {
-						String[] wh = Text.splitPair(part, 'x');
-						if (wh == null) {
-							continue;
-						}
-
-						int w = TextValues.tryParseInt(wh[0], -1);
-						int h = TextValues.tryParseInt(wh[1], -1);
-
-						if (w > 0 && h > 0) {
-							width = w;
-							height = h;
-							break;
-						}
-					}
+					framerate = Float.parseFloat(RegexUtil.findFirst(line, Pattern.compile("\\s(\\d+(\\.\\d+)?)\\stbr,"), 1));
+					int[] wh = TextValues.parseInts(RegexUtil.find(line, Pattern.compile("\\s(\\d+)x(\\d+)[\\s,]"), 1, 2));
+					width = wh[0];
+					height = wh[1];
 				}
 			}
 

@@ -35,8 +35,10 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.lwjgl.openal.AL;
+import org.lwjgl.opengl.Display;
 
 import craterstudio.io.Streams;
+import craterstudio.text.TextValues;
 import craterstudio.util.HighLevel;
 
 public abstract class VideoPlayback implements Closeable {
@@ -130,25 +132,13 @@ public abstract class VideoPlayback implements Closeable {
 
 		while (videoRenderer.isVisible()) {
 
-			boolean doWait;
-			switch (audioFrameIndex) {
-				case AUDIO_TERMINATED:
-					// reached end of audio
-					return;
-
-				case AUDIO_UNAVAILABLE:
-					// sync video with clock
-					doWait = videoFrameIndex * frameInterval > System.nanoTime() - initFrame;
-					break;
-
-				default:
-					// sync video with audio
-					doWait = videoFrameIndex > audioFrameIndex;
-					break;
+			if (audioFrameIndex == AUDIO_TERMINATED) {
+				// reached end of audio
+				return;
 			}
 
-			if (!doWait) {
-				break;
+			if (this.isTimeForNextFrame()) {
+				return;
 			}
 
 			HighLevel.sleep(1);
@@ -159,11 +149,29 @@ public abstract class VideoPlayback implements Closeable {
 		}
 	}
 
+	public boolean isTimeForNextFrame() {
+		int audioFrameIndex = this.getAudioFrameIndex();
+
+		switch (audioFrameIndex) {
+			case AUDIO_TERMINATED:
+				// reached end of audio
+				return true;
+
+			case AUDIO_UNAVAILABLE:
+				// sync video with clock
+				return videoFrameIndex * frameInterval <= System.nanoTime() - initFrame;
+
+			default:
+				// sync video with audio
+				return videoFrameIndex <= audioFrameIndex;
+		}
+	}
+
 	public void runDisplayLoop() {
 
 		System.out.println("Video buffering...");
-		ByteBuffer rgb = this.videoStream.frameQueue.take();
-		if (rgb == null) {
+		ByteBuffer videoFrameBuffer = this.videoStream.frameQueue.take();
+		if (videoFrameBuffer == null) {
 			System.out.println("no initial frame");
 			return;
 		}
@@ -172,39 +180,65 @@ public abstract class VideoPlayback implements Closeable {
 
 		long secondStarted = System.nanoTime();
 		int videoFramerate = 0;
+		int renderFrameRate = 0;
+		long frameRenderTime = 0;
 
 		this.init();
 
 		videoRenderer.init(this.videoStream.metadata);
 
-		do {
-			this.sync();
+		boolean blockingSync = false;
 
-			// render
-			long frameRenderTime;
-			{
-				long t0 = System.nanoTime();
-				this.videoRenderer.render(rgb);
-				long t1 = System.nanoTime();
-				frameRenderTime = t1 - t0;
+		ByteBuffer videoUpdateBuffer = videoFrameBuffer;
+		do {
+			if (blockingSync) {
+				this.sync();
+			} else {
+				if (this.isTimeForNextFrame()) {
+					this.videoStream.framePool.release(videoFrameBuffer);
+					videoFrameBuffer = this.videoStream.frameQueue.take();
+					if (videoFrameBuffer == null) {
+						// end of video
+						break;
+					}
+					videoUpdateBuffer = videoFrameBuffer;
+					videoFrameIndex++;
+					videoFramerate++;
+				}
 			}
 
-			videoFrameIndex++;
-			videoFramerate++;
+			// render video
+			{
+				long t0 = System.nanoTime();
+				this.videoRenderer.render(videoUpdateBuffer); // can be null
+				long t1 = System.nanoTime();
+				if (videoUpdateBuffer != null)
+					frameRenderTime = t1 - t0;
+				videoUpdateBuffer = null;
+			}
+
+			renderFrameRate++;
 
 			// stats
 			if (System.nanoTime() > secondStarted + 1000_000_000L) {
 				videoRenderer.setStats(//
-				   +videoFramerate + "fps " + //
-				      "(receiving: " + (videoStream.frameReadingTime / 1000_000L) + "ms, " + //
-				      "rendering: " + (frameRenderTime / 1000_000L) + "ms)");
+				   "playing at " + +videoFramerate + "fps, " + //
+				      "rendering at " + renderFrameRate + "fps " + //
+				      "(receiving: " + TextValues.formatNumber(videoStream.frameReadingTime / 1000_000.0, 1) + "ms, " + //
+				      "rendering: " + TextValues.formatNumber(frameRenderTime / 1000_000.0, 1) + "ms)");
 				videoFramerate = 0;
+				renderFrameRate = 0;
 				secondStarted += 1000_000_000L;
 			}
 
-			this.videoStream.framePool.release(rgb);
-			rgb = this.videoStream.frameQueue.take();
-		} while (videoRenderer.isVisible() && rgb != null);
+			if (blockingSync) {
+				this.videoStream.framePool.release(videoFrameBuffer);
+				videoFrameBuffer = this.videoStream.frameQueue.take();
+				videoUpdateBuffer = videoFrameBuffer;
+			}
+
+			Display.update();
+		} while (videoRenderer.isVisible());
 
 		System.out.println("Image Queue: EOF");
 
