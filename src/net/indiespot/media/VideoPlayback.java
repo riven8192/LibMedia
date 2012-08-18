@@ -50,6 +50,16 @@ public abstract class VideoPlayback implements Closeable {
 		this.audioStream = audioStream;
 	}
 
+	//
+
+	private boolean coupleFramerateToVideo;
+
+	public void setCoupleFramerateToVideo(boolean coupleFramerateToVideo) {
+		this.coupleFramerateToVideo = coupleFramerateToVideo;
+	}
+
+	//
+
 	public void startVideo(VideoRenderer videoRenderer, AudioRenderer audioRenderer) {
 		this.videoRenderer = videoRenderer;
 		this.audioRenderer = null;
@@ -187,37 +197,23 @@ public abstract class VideoPlayback implements Closeable {
 
 		videoRenderer.init(this.videoStream.metadata);
 
-		boolean blockingSync = false;
-
 		ByteBuffer videoUpdateBuffer = videoFrameBuffer;
 		do {
-			if (blockingSync) {
+			renderFrameRate++;
+
+			if (coupleFramerateToVideo) {
 				this.sync();
-			} else {
-				if (this.isTimeForNextFrame()) {
-					this.videoStream.framePool.release(videoFrameBuffer);
-					videoFrameBuffer = this.videoStream.frameQueue.take();
-					if (videoFrameBuffer == null) {
-						// end of video
-						break;
-					}
-					videoUpdateBuffer = videoFrameBuffer;
-					videoFrameIndex++;
-					videoFramerate++;
-				}
 			}
 
 			// render video
 			{
 				long t0 = System.nanoTime();
-				this.videoRenderer.render(videoUpdateBuffer); // can be null
+				this.videoRenderer.render(videoUpdateBuffer); // buffer can be null
 				long t1 = System.nanoTime();
 				if (videoUpdateBuffer != null)
 					frameRenderTime = t1 - t0;
 				videoUpdateBuffer = null;
 			}
-
-			renderFrameRate++;
 
 			// stats
 			if (System.nanoTime() > secondStarted + 1000_000_000L) {
@@ -231,10 +227,16 @@ public abstract class VideoPlayback implements Closeable {
 				secondStarted += 1000_000_000L;
 			}
 
-			if (blockingSync) {
+			if (coupleFramerateToVideo || this.isTimeForNextFrame()) {
 				this.videoStream.framePool.release(videoFrameBuffer);
 				videoFrameBuffer = this.videoStream.frameQueue.take();
+				if (videoFrameBuffer == null) {
+					// end of video
+					break;
+				}
 				videoUpdateBuffer = videoFrameBuffer;
+				videoFrameIndex++;
+				videoFramerate++;
 			}
 
 			Display.update();

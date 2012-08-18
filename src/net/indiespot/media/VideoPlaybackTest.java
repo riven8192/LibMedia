@@ -52,11 +52,12 @@ class VideoPlaybackTest {
 		if (videoRenderer instanceof OpenGLVideoRenderer) {
 			OpenGLVideoRenderer opengl = (OpenGLVideoRenderer) videoRenderer;
 			opengl.setFullscreen(false);
-			opengl.setVSync(true);
+			opengl.setVSync(false);
 			opengl.setRenderRotatingQuad(true);
 		}
 
 		VideoPlayback playback = new FFmpegVideoPlayback(movieFile);
+		playback.setCoupleFramerateToVideo(false);
 		playback.startVideo(videoRenderer, audioRenderer);
 
 		/**

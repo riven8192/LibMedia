@@ -42,7 +42,6 @@ import org.lwjgl.opengl.DisplayMode;
 import org.lwjgl.opengl.GLContext;
 import org.lwjgl.opengl.PixelFormat;
 
-import craterstudio.bytes.NativeHacks;
 import craterstudio.math.EasyMath;
 import craterstudio.text.TextValues;
 
@@ -72,7 +71,7 @@ public class OpenGLVideoRenderer implements VideoRenderer {
 	public void setVSync(boolean vsync) {
 		this.vsync = vsync;
 	}
-
+	
 	//
 
 	private boolean renderRotatingQuad;
