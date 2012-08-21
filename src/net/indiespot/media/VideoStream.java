@@ -31,50 +31,68 @@
 package net.indiespot.media;
 
 import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 
 import net.indiespot.media.impl.VideoMetadata;
 
-import craterstudio.util.Pool;
-import craterstudio.util.PoolHandler;
-import craterstudio.util.concur.SimpleBlockingQueue;
 
-public abstract class VideoStream implements Closeable {
+public class VideoStream implements Closeable {
+	 final DataInputStream videoStream;
+	private final VideoMetadata metadata;
+	private final byte[] tmp1, tmp2;
 
-	protected final VideoMetadata metadata;
-	protected final SimpleBlockingQueue<ByteBuffer> frameQueue;
-	protected final Pool<ByteBuffer> framePool;
-
-	public volatile long frameReadingTime;
-
-	public VideoStream(VideoMetadata metadata) {
+	public VideoStream(InputStream rgbStream, VideoMetadata metadata) {
+		this.videoStream = new DataInputStream(rgbStream);
 		this.metadata = metadata;
-		this.frameQueue = new SimpleBlockingQueue<>(3);
 
-		this.framePool = new Pool<>(new PoolHandler<ByteBuffer>() {
-			@Override
-			public ByteBuffer create() {
-				// heap buffer!
-				return ByteBuffer.allocateDirect(VideoStream.this.metadata.width * VideoStream.this.metadata.height * 3);
-			}
-
-			public void clean(ByteBuffer buffer) {
-				buffer.clear();
-			}
-		}).asThreadSafePool();
+		this.tmp1 = new byte[64 * 1024];
+		this.tmp2 = new byte[(metadata.width * metadata.height * 3) % tmp1.length];
 	}
 
-	//
+	public ByteBuffer readFrameInto(ByteBuffer rgbBuffer) {
+		if (metadata.width * metadata.height * 3 != rgbBuffer.remaining()) {
+			throw new IllegalArgumentException();
+		}
 
-	protected void startReadLoop() {
+		/*
+		 * Using DataInputStream(ffmpeg.stdin).readFully(byte[64*1024]) instead of
+		 * DataInputStream(BufferedInputStream(ffmpeg.stdin, 64*1024)) as it is
+		 * about 50x slower... ~8ms vs. ~330ms per frame. wtf?!
+		 */
 
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				runReadLoop(framePool, frameQueue);
+		int cnt1 = rgbBuffer.remaining() / tmp1.length;
+		int cnt2 = tmp2.length > 0 ? 1 : 0;
+
+		try {
+			/*
+			 * Wouldn't that be easy...
+			 * 
+			 * videoStream.readFully(rgbArray);
+			 */
+
+			for (int i = 0; i < cnt1; i++) {
+				videoStream.readFully(tmp1);
+				rgbBuffer.put(tmp1);
 			}
-		}, "VideoPlayer-ReadLoop").start();
+			for (int i = 0; i < cnt2; i++) {
+				videoStream.readFully(tmp2);
+				rgbBuffer.put(tmp2);
+			}
+
+			if (rgbBuffer.hasRemaining()) {
+				throw new IllegalStateException();
+			}
+		} catch (IOException exc) {
+			return null;
+		}
+		return rgbBuffer;
 	}
 
-	protected abstract void runReadLoop(Pool<ByteBuffer> pool, SimpleBlockingQueue<ByteBuffer> frameQueue);
+	@Override
+	public void close() throws IOException {
+		this.videoStream.close();
+	}
 }

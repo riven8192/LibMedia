@@ -39,6 +39,7 @@ import org.lwjgl.LWJGLException;
 import org.lwjgl.openal.AL;
 
 import net.indiespot.media.AudioRenderer;
+import net.indiespot.media.Movie;
 
 import craterstudio.io.Streams;
 import craterstudio.math.EasyMath;
@@ -119,7 +120,7 @@ public class OpenALAudioRenderer extends AudioRenderer {
 	}
 
 	@SuppressWarnings("incomplete-switch")
-	public boolean tick() {
+	public boolean tick(Movie sync) {
 
 		switch (this.state) {
 			case INIT:
@@ -194,7 +195,7 @@ public class OpenALAudioRenderer extends AudioRenderer {
 			alDeleteBuffers(buffer);
 
 			this.lastBuffersProcessed--;
-			this.incAudioFrameIndex();
+			sync.onRenderedAudioBuffer();
 
 			this.enqueueNextSamples();
 		}
@@ -211,6 +212,7 @@ public class OpenALAudioRenderer extends AudioRenderer {
 				if (this.hasMoreSamples) {
 					this.state = State.BUFFERING;
 				} else {
+					sync.onEndOfAudio();
 					Streams.safeClose(this);
 					return false;
 				}

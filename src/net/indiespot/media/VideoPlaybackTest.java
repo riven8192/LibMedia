@@ -30,57 +30,10 @@
 
 package net.indiespot.media;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.InputStreamReader;
+import net.indiespot.media.test.TestGameLoop;
 
-import net.indiespot.media.impl.FFmpegVideoPlayback;
-import net.indiespot.media.impl.OpenALAudioRenderer;
-import net.indiespot.media.impl.OpenGLVideoRenderer;
-
-class VideoPlaybackTest {
+public class VideoPlaybackTest {
 	public static void main(String[] args) throws Exception {
-
-		File movieFile = new File(args[0]);
-
-		boolean audioEnabled = true;
-
-		VideoRenderer videoRenderer = new OpenGLVideoRenderer(movieFile.getName());
-		AudioRenderer audioRenderer = audioEnabled ? new OpenALAudioRenderer() : null;
-
-		if (videoRenderer instanceof OpenGLVideoRenderer) {
-			OpenGLVideoRenderer opengl = (OpenGLVideoRenderer) videoRenderer;
-			opengl.setFullscreen(false);
-			opengl.setVSync(false);
-			opengl.setRenderRotatingQuad(true);
-		}
-
-		VideoPlayback playback = new FFmpegVideoPlayback(movieFile);
-		playback.setCoupleFramerateToVideo(false);
-		playback.startVideo(videoRenderer, audioRenderer);
-
-		/**
-		 * oldskool controls!!
-		 */
-
-		BufferedReader br = new BufferedReader(new InputStreamReader(new BufferedInputStream(System.in)));
-		while (true) {
-			String line = br.readLine();
-
-			if (line.equals("mute")) {
-				playback.setVolume(0.0f);
-			} else if (line.equals("half")) {
-				playback.setVolume(0.5f);
-			} else if (line.equals("full")) {
-				playback.setVolume(1.0f);
-			} else if (line.equals("pause")) {
-				playback.pause();
-			} else if (line.equals("resume")) {
-				playback.resume();
-			} else {
-				System.out.println("wait what?");
-			}
-		}
+		TestGameLoop.main(args[0]);
 	}
 }

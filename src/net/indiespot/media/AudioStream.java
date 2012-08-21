@@ -31,9 +31,9 @@
 package net.indiespot.media;
 
 import java.io.Closeable;
-import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 
 public class AudioStream implements Closeable {
 	public int audioFormat;
@@ -43,40 +43,40 @@ public class AudioStream implements Closeable {
 	public int blockAlign;
 	public int bytesPerSample;
 
-	public final DataInput input;
+	public final DataInputStream input;
 	public int sampleCount;
 
-	public AudioStream(DataInput input) throws IOException {
-		this.input = input;
+	public AudioStream(InputStream input) throws IOException {
+		this.input = new DataInputStream(input);
 
 		while (true) {
-			String chunkName = readString(input, 4);
-			int chunkSize = swap32(input.readInt());
+			String chunkName = readString(this.input, 4);
+			int chunkSize = swap32(this.input.readInt());
 
 			// System.out.println("WAV chunk: [" + chunkName + "] size=" +
 			// chunkSize);
 
 			if (chunkName.equals("RIFF")) {
-				if (!"WAVE".equals(readString(input, 4))) {
+				if (!"WAVE".equals(readString(this.input, 4))) {
 					throw new IllegalStateException();
 				}
 			} else if (chunkName.equals("fmt ")) {
-				this.audioFormat = swap16(input.readUnsignedShort());
-				this.numChannels = swap16(input.readUnsignedShort());
-				this.sampleRate = swap32(input.readInt());
-				this.byteRate = swap32(input.readInt());
-				this.blockAlign = swap16(input.readUnsignedShort());
-				this.bytesPerSample = swap16(input.readUnsignedShort()) / 8;
+				this.audioFormat = swap16(this.input.readUnsignedShort());
+				this.numChannels = swap16(this.input.readUnsignedShort());
+				this.sampleRate = swap32(this.input.readInt());
+				this.byteRate = swap32(this.input.readInt());
+				this.blockAlign = swap16(this.input.readUnsignedShort());
+				this.bytesPerSample = swap16(this.input.readUnsignedShort()) / 8;
 
 				for (int off = 16; off < chunkSize; off++) {
-					input.readByte();
+					this.input.readByte();
 				}
 			} else if (chunkName.equals("data")) {
 				this.sampleCount = chunkSize / this.bytesPerSample / this.numChannels;
 				break;
 			} else {
 				for (int off = 0; off < chunkSize; off++) {
-					input.readByte();
+					this.input.readByte();
 				}
 			}
 		}
@@ -112,14 +112,12 @@ public class AudioStream implements Closeable {
 	}
 
 	public void close() throws IOException {
-		if (input instanceof Closeable) {
-			((Closeable) input).close();
-		}
+		input.close();
 	}
 
 	//
 
-	private static String readString(DataInput raf, int len) throws IOException {
+	private static String readString(DataInputStream raf, int len) throws IOException {
 		char[] cs = new char[len];
 		for (int i = 0; i < len; i++)
 			cs[i] = (char) (raf.readByte() & 0xFF);

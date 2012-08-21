@@ -30,43 +30,66 @@
 
 package net.indiespot.media.impl;
 
-import java.io.BufferedInputStream;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import org.lwjgl.opengl.Display;
 
-import net.indiespot.media.AudioStream;
-import net.indiespot.media.VideoPlayback;
-import net.indiespot.media.VideoStream;
+import craterstudio.text.TextValues;
+import craterstudio.util.HighLevel;
 
-public class FFmpegVideoPlayback extends VideoPlayback {
-	public FFmpegVideoPlayback(File movieFile) throws IOException {
-		super(//
-		   video(movieFile),//
-		   audio(movieFile)//
-		);
+class VSyncSleeper {
+	private static final long INTERVAL = 1_000_000_000L / 60;
+
+	private long nextPostSync;
+	private long errorMargin;
+
+	public void setSyncErrorMargin(int millis) {
+		this.errorMargin = (millis * 1_000_000L);
 	}
 
-	private static final ThreadLocal<VideoMetadata> metadata = new ThreadLocal<>();
-
-	private static VideoMetadata metadata(File movieFile) throws IOException {
-		VideoMetadata metadata = FFmpeg.extractMetadata(movieFile);
-		FFmpegVideoPlayback.metadata.set(metadata);
-		return metadata;
-	}
-
-	private static VideoStream video(File movieFile) throws IOException {
-		InputStream rgbStream = FFmpeg.extractVideoAsRGB24(movieFile);
-		return new Rgb24VideoStream(rgbStream, metadata(movieFile));
-	}
-
-	private static AudioStream audio(File movieFile) throws IOException {
-		InputStream wavStream = FFmpeg.extractAudioAsWAV(movieFile);
-		try {
-			return new AudioStream(new DataInputStream(new BufferedInputStream(wavStream)));
-		} catch (IOException exc) {
-			return null;
+	public void measureSyncTimestamp(int frames) {
+		// ensure GPU cannot use async updates
+		nextPostSync = System.nanoTime();
+		for (int i = 0; i < frames; i++) {
+			Display.update();
+			long now = System.nanoTime();
+			System.out.println("VSyncSleeper: " + TextValues.formatNumber((now - nextPostSync) / 1_000_000.0, 2) + "ms");
+			nextPostSync = now;
 		}
+	}
+
+	private void debugMeasureSyncPredictionError() {
+		/**
+		 * result: even over thousands of frames, the error is within 1ms
+		 */
+		for (int i = 0; true; i++) {
+			Display.update();
+
+			System.out.println("vsync prediction error: " + TextValues.formatNumber(//
+			   (System.nanoTime() - (nextPostSync + (i + 1) * INTERVAL)) / 1_000_000.0, 2) + "ms");
+		}
+	}
+
+	public void sleepUntilBeforeVsync() {
+		this.calcNextPostVync(System.nanoTime());
+
+		long wakeupAt = this.nextPostSync - this.errorMargin;
+		if (wakeupAt < System.nanoTime()) {
+			return;
+		}
+
+		// System.out.println("VSyncSleeper: wait for " +
+		// TextValues.formatNumber((wakeupAt - System.nanoTime()) / 1_000_000.0,
+		// 2) + "ms");
+
+		while (System.nanoTime() < wakeupAt) {
+			HighLevel.sleep(1);
+		}
+	}
+
+	private void calcNextPostVync(long now) {
+		long next = nextPostSync;
+		while (next < now) {
+			next += INTERVAL;
+		}
+		nextPostSync = next;
 	}
 }

@@ -45,7 +45,7 @@ public abstract class AudioRenderer implements Closeable {
 	protected final ByteBuffer[] bufferDuo = new ByteBuffer[2];
 	private final ByteList bufferIndexList = new ByteList();
 
-	void init(AudioStream audioStream, float frameRate) {
+	public void init(AudioStream audioStream, float frameRate) {
 		this.audioStream = audioStream;
 		this.frameRate = frameRate;
 
@@ -115,15 +115,6 @@ public abstract class AudioRenderer implements Closeable {
 	}
 
 	private int loadIndex = 0;
-	private int audioFrame = 0;
-
-	public int getAudioFrameIndex() {
-		return audioFrame;
-	}
-
-	protected void incAudioFrameIndex() {
-		this.audioFrame++;
-	}
 
 	public abstract void pause();
 
@@ -131,7 +122,7 @@ public abstract class AudioRenderer implements Closeable {
 
 	public abstract void setVolume(float volume);
 
-	public abstract boolean tick();
+	public abstract boolean tick(Movie sync);
 
 	public ByteBuffer loadNextSamples() {
 		try {

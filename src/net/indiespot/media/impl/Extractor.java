@@ -28,7 +28,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package net.indiespot.media;
+package net.indiespot.media.impl;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -37,7 +37,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
-import net.indiespot.media.impl.FFmpeg;
 import craterstudio.io.Streams;
 import craterstudio.text.Text;
 
@@ -52,7 +51,13 @@ public class Extractor {
 		isWindows = osName.contains("Windows");
 		isMac = osName.contains("Mac");
 		isLinux = !isWindows && !isMac;
-		is64bit = !osArch.equals("x86");
+
+		String bits = System.getProperty("sun.arch.data.model");
+		if (bits != null) {
+			is64bit = Integer.parseInt(bits) == 64;
+		} else {
+			is64bit = osArch.equals("amd64") || osArch.equals("x86_64");
+		}
 	}
 
 	public static void extractNativeLibrary(String resourceName) throws IOException {

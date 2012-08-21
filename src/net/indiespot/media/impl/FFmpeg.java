@@ -37,16 +37,15 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.regex.Pattern;
 
-import net.indiespot.media.Extractor;
 import craterstudio.io.Streams;
 import craterstudio.streams.NullOutputStream;
 import craterstudio.text.RegexUtil;
 import craterstudio.text.TextValues;
 
 public class FFmpeg {
+
 	public static String FFMPEG_PATH;
 	public static boolean FFMPEG_VERBOSE = false;
-	public static String JPEG_QUALITY = "1";
 
 	static {
 		String resourceName = "./bin/ffmpeg";
@@ -118,19 +117,6 @@ public class FFmpeg {
 
 	//
 
-	public static void extractAudioAsWAV(File srcMovieFile, File dstWavFile) throws IOException {
-		await(new ProcessBuilder().command(//
-		   FFMPEG_PATH, //
-		   "-y", //
-		   "-i", srcMovieFile.getAbsolutePath(), //
-		   "-acodec", "pcm_s16le", //
-		   "-ac", "2", //
-		   // "-ss", "00:05:00.00", //
-		   "-f", "wav", //
-		   dstWavFile.getAbsolutePath() //
-		   ));
-	}
-
 	public static InputStream extractAudioAsWAV(File srcMovieFile) throws IOException {
 		return streamData(new ProcessBuilder().command(//
 		   FFMPEG_PATH, //
@@ -144,17 +130,6 @@ public class FFmpeg {
 	}
 
 	//
-
-	private static void await(ProcessBuilder pb) throws IOException {
-		Process process = pb.start();
-		Streams.asynchronousTransfer(process.getInputStream(), System.out, true, false);
-		Streams.asynchronousTransfer(process.getErrorStream(), System.err, true, false);
-		try {
-			process.waitFor();
-		} catch (InterruptedException exc) {
-			throw new IllegalStateException(exc);
-		}
-	}
 
 	private static InputStream streamData(ProcessBuilder pb) throws IOException {
 		Process process = pb.start();
