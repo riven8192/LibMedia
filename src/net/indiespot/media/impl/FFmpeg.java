@@ -48,7 +48,7 @@ public class FFmpeg {
 	public static boolean FFMPEG_VERBOSE = false;
 
 	static {
-		String resourceName = "./bin/ffmpeg";
+		String resourceName = "./lib/ffmpeg/ffmpeg";
 		if (Extractor.isMac) {
 			resourceName += "-mac";
 		} else {
@@ -61,7 +61,7 @@ public class FFmpeg {
 		FFMPEG_PATH = resourceName;
 
 		if (!new File(FFMPEG_PATH).exists()) {
-			FFMPEG_PATH = "./res/ffmpeg32.exe";
+			throw new IllegalStateException("Failed to find ffmpeg: " + new File(FFMPEG_PATH).getAbsolutePath());
 		}
 	}
 

@@ -35,11 +35,14 @@ import static org.lwjgl.opengl.GL11.*;
 import java.io.File;
 import java.nio.ByteBuffer;
 
+import net.indiespot.media.AudioRenderer;
 import net.indiespot.media.Movie;
 import net.indiespot.media.impl.OpenALAudioRenderer;
 
 import org.lwjgl.BufferUtils;
 import org.lwjgl.LWJGLException;
+import org.lwjgl.input.Keyboard;
+import org.lwjgl.input.Mouse;
 import org.lwjgl.openal.AL;
 import org.lwjgl.opengl.Display;
 import org.lwjgl.opengl.DisplayMode;
@@ -52,7 +55,7 @@ import craterstudio.text.TextValues;
 public class TestGameLoop {
 	public static void main(String path) throws Exception {
 
-		File movieFile = new File(path);
+		final File movieFile = new File(path);
 		Movie movie = Movie.open(movieFile);
 
 		OpenALAudioRenderer audioRenderer = new OpenALAudioRenderer();
@@ -64,6 +67,7 @@ public class TestGameLoop {
 		Display.setResizable(true);
 		Display.setTitle("TestGame");
 		Display.setVSyncEnabled(false);
+		AL.create();
 
 		// create display
 		{
@@ -127,6 +131,40 @@ public class TestGameLoop {
 
 		while (!Display.isCloseRequested()) {
 
+			// handle input
+			{
+				while (Keyboard.next()) {
+					if (Keyboard.getEventKeyState()) { // on key press
+						if (Keyboard.getEventKey() == Keyboard.KEY_SPACE) {
+							if (audioRenderer.getState() == AudioRenderer.State.PLAYING) {
+								audioRenderer.pause();
+							} else if (audioRenderer.getState() == AudioRenderer.State.PAUSED) {
+								audioRenderer.resume();
+							}
+						} else if (Keyboard.getEventKey() == Keyboard.KEY_ESCAPE) {
+							audioRenderer.stop();
+						}
+					}
+				}
+
+				while (Mouse.next()) {
+					if (Mouse.getDWheel() != 0) { // on scrollwheel rotate
+						float volume = audioRenderer.getVolume();
+						volume += (Mouse.getDWheel() > 0) ? +0.1f : -0.1f;
+						volume = EasyMath.clamp(volume, 0.0f, 1.0f);
+						audioRenderer.setVolume(volume);
+					}
+
+					if (Mouse.getEventButtonState()) { // on mouse-button press
+						if (audioRenderer.getState() == AudioRenderer.State.PLAYING) {
+							audioRenderer.pause();
+						} else if (audioRenderer.getState() == AudioRenderer.State.PAUSED) {
+							audioRenderer.resume();
+						}
+					}
+				}
+			}
+
 			audioRenderer.tick(movie);
 
 			glClearColor(0, 0, 0, 1);
@@ -135,17 +173,15 @@ public class TestGameLoop {
 			// position camera, make it sway
 			{
 				glMatrixMode(GL_MODELVIEW);
-				{
-					glLoadIdentity();
+				glLoadIdentity();
 
-					long elapsed = (System.nanoTime() - started) / 1_000_000L;
-					float angle = 90 + (float) Math.sin(elapsed * 0.001) * 15;
+				long elapsed = (System.nanoTime() - started) / 1_000_000L;
+				float angle = 90 + (float) Math.sin(elapsed * 0.001) * 15;
 
-					// inverse camera transformations
-					glRotatef(-angle, 0, 1, 0);
-					glRotatef(-15f, 0, 0, 1);
-					glTranslatef(-3, -1.7f, -0);
-				}
+				// inverse camera transformations
+				glRotatef(-angle, 0, 1, 0);
+				glRotatef(-15f, 0, 0, 1); // look down
+				glTranslatef(-3, -1.7f, -0);
 			}
 
 			glEnable(GL_TEXTURE_2D);
@@ -223,6 +259,7 @@ public class TestGameLoop {
 
 				glPopMatrix();
 			}
+			glFlush();
 			textureRenderTook = System.nanoTime() - textureRenderTook;
 
 			renderFramesLastSecond++;

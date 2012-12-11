@@ -38,6 +38,10 @@ import craterstudio.data.ByteList;
 import craterstudio.text.TextValues;
 
 public abstract class AudioRenderer implements Closeable {
+	public static enum State {
+		INIT, BUFFERING, PLAYING, PAUSED, CLOSED;
+	}
+
 	protected AudioStream audioStream;
 	protected float frameRate;
 	private byte[] largest;
@@ -116,11 +120,23 @@ public abstract class AudioRenderer implements Closeable {
 
 	private int loadIndex = 0;
 
+	public abstract State getState();
+
+	//
+
 	public abstract void pause();
 
 	public abstract void resume();
 
+	public abstract void stop();
+
+	//
+
+	public abstract float getVolume();
+
 	public abstract void setVolume(float volume);
+
+	//
 
 	public abstract boolean tick(Movie sync);
 

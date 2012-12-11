@@ -118,6 +118,12 @@ public class Movie implements Closeable {
 
 	public void onEndOfAudio() {
 		audioIndex = AUDIO_TERMINATED;
+
+		try {
+			this.close();
+		} catch (IOException exc) {
+			exc.printStackTrace();
+		}
 	}
 
 	public void onRenderedAudioBuffer() {

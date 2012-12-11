@@ -35,14 +35,12 @@ import static org.lwjgl.openal.AL10.*;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.lwjgl.LWJGLException;
-import org.lwjgl.openal.AL;
-
 import net.indiespot.media.AudioRenderer;
 import net.indiespot.media.Movie;
 
 import craterstudio.io.Streams;
 import craterstudio.math.EasyMath;
+import craterstudio.util.HighLevel;
 import craterstudio.util.concur.SimpleBlockingQueue;
 
 public class OpenALAudioRenderer extends AudioRenderer {
@@ -51,11 +49,7 @@ public class OpenALAudioRenderer extends AudioRenderer {
 	private boolean hasMoreSamples = true;
 
 	private static enum ActionType {
-		ADJUST_VOLUME, PAUSE_AUDIO, RESUME_AUDIO
-	}
-
-	private static enum State {
-		INIT, BUFFERING, PLAYING, PAUSED, CLOSED;
+		ADJUST_VOLUME, PAUSE_AUDIO, RESUME_AUDIO, STOP_AUDIO
 	}
 
 	private static class Action {
@@ -74,13 +68,25 @@ public class OpenALAudioRenderer extends AudioRenderer {
 
 	final SimpleBlockingQueue<Action> pendingActions = new SimpleBlockingQueue<>();
 
+	//
+
+	private float volume = 1.0f;
+
 	@Override
 	public void setVolume(float volume) {
 		if (!EasyMath.isBetween(volume, 0.0f, 1.0f)) {
 			throw new IllegalArgumentException();
 		}
+		this.volume = volume;
 		pendingActions.put(new Action(ActionType.ADJUST_VOLUME, Float.valueOf(volume)));
 	}
+
+	@Override
+	public float getVolume() {
+		return this.volume;
+	}
+
+	//
 
 	@Override
 	public void pause() {
@@ -92,16 +98,21 @@ public class OpenALAudioRenderer extends AudioRenderer {
 		pendingActions.put(new Action(ActionType.RESUME_AUDIO, null));
 	}
 
+	@Override
+	public void stop() {
+		pendingActions.put(new Action(ActionType.STOP_AUDIO, null));
+	}
+
 	private State state = State.INIT;
+
+	@Override
+	public State getState() {
+		return state;
+	}
+
 	private int alSource;
 
 	private void init() {
-		try {
-			AL.create();
-		} catch (LWJGLException exc) {
-			exc.printStackTrace();
-		}
-
 		this.alSource = alGenSources();
 		if (this.alSource == 0) {
 			throw new IllegalStateException();
@@ -163,6 +174,12 @@ public class OpenALAudioRenderer extends AudioRenderer {
 					state = State.PLAYING;
 					break;
 
+				case STOP_AUDIO:
+					System.out.println("stopping...");
+					alSourceStop(alSource);
+					state = State.CLOSED;
+					break;
+
 				default:
 					throw new IllegalStateException();
 			}
@@ -170,6 +187,7 @@ public class OpenALAudioRenderer extends AudioRenderer {
 
 		switch (this.state) {
 			case PLAYING:
+			case CLOSED:
 				break;
 
 			case PAUSED:
@@ -206,10 +224,21 @@ public class OpenALAudioRenderer extends AudioRenderer {
 				break;
 
 			case AL_STOPPED:
+				if (this.state == State.CLOSED) {
+					while (true) {
+						int buffer = alSourceUnqueueBuffers(alSource);
+						if (buffer < 0) {
+							break;
+						}
+						alDeleteBuffers(buffer);
+					}
+				}
+
 				if (this.lastBuffersProcessed != 0) {
 					throw new IllegalStateException("should never happen");
 				}
-				if (this.hasMoreSamples) {
+
+				if (this.state != State.CLOSED && this.hasMoreSamples) {
 					this.state = State.BUFFERING;
 				} else {
 					sync.onEndOfAudio();
