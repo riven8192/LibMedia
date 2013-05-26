@@ -120,10 +120,8 @@ public class OpenALAudioRenderer extends AudioRenderer {
 	}
 
 	private void buffer() {
-		System.out.println("Audio buffering...");
-
 		// buffer 1sec of audio
-		for (int i = 0; i < frameRate; i++) {
+		for (int i = 0; i < 5 || i < frameRate * 0.1f; i++) {
 			this.enqueueNextSamples();
 		}
 
@@ -163,19 +161,16 @@ public class OpenALAudioRenderer extends AudioRenderer {
 					break;
 
 				case PAUSE_AUDIO:
-					System.out.println("pausing...");
 					alSourcePause(alSource);
 					state = State.PAUSED;
 					return true;
 
 				case RESUME_AUDIO:
-					System.out.println("resuming...");
 					alSourcePlay(alSource);
 					state = State.PLAYING;
 					break;
 
 				case STOP_AUDIO:
-					System.out.println("stopping...");
 					alSourceStop(alSource);
 					state = State.CLOSED;
 					break;
@@ -232,6 +227,7 @@ public class OpenALAudioRenderer extends AudioRenderer {
 						}
 						alDeleteBuffers(buffer);
 					}
+					this.state = State.CLOSED;
 				}
 
 				if (this.lastBuffersProcessed != 0) {
@@ -255,7 +251,6 @@ public class OpenALAudioRenderer extends AudioRenderer {
 	}
 
 	private void enqueueNextSamples() {
-
 		if (!this.hasMoreSamples) {
 			return;
 		}
@@ -269,6 +264,12 @@ public class OpenALAudioRenderer extends AudioRenderer {
 		int buffer = alGenBuffers();
 		alBufferData(buffer, AL_FORMAT_STEREO16, samples, audioStream.sampleRate);
 		alSourceQueueBuffers(this.alSource, buffer);
+	}
+
+	public void await() throws IOException {
+		while (alGetSourcei(alSource, AL_SOURCE_STATE) == AL_PLAYING) {
+			HighLevel.sleep(1);
+		}
 	}
 
 	public void close() throws IOException {

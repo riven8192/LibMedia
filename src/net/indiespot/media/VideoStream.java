@@ -36,13 +36,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 
+import craterstudio.util.concur.SimpleBlockingQueue;
+
 import net.indiespot.media.impl.VideoMetadata;
 
-
 public class VideoStream implements Closeable {
-	 final DataInputStream videoStream;
+	final DataInputStream videoStream;
 	private final VideoMetadata metadata;
 	private final byte[] tmp1, tmp2;
+	private final SimpleBlockingQueue<ByteBuffer> emptyQueue, filledQueue;
 
 	public VideoStream(InputStream rgbStream, VideoMetadata metadata) {
 		this.videoStream = new DataInputStream(rgbStream);
@@ -50,9 +52,44 @@ public class VideoStream implements Closeable {
 
 		this.tmp1 = new byte[64 * 1024];
 		this.tmp2 = new byte[(metadata.width * metadata.height * 3) % tmp1.length];
+
+		this.emptyQueue = new SimpleBlockingQueue<>();
+		this.filledQueue = new SimpleBlockingQueue<>();
+
+		for (int i = 0; i < 3; i++) {
+			this.emptyQueue.put(ByteBuffer.allocateDirect(metadata.width * metadata.height * 3));
+		}
+
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				while (!closed) {
+					if (!pumpFramesInto()) {
+						break;
+					}
+				}
+
+				filledQueue.put(EOF);
+			}
+		}).start();
 	}
 
-	public ByteBuffer readFrameInto(ByteBuffer rgbBuffer) {
+	public ByteBuffer pollFrameData() {
+		return filledQueue.poll();
+	}
+
+	public void freeFrameData(ByteBuffer bb) {
+		if (bb == null) {
+			throw new IllegalArgumentException();
+		}
+		bb.clear();
+		emptyQueue.put(bb);
+	}
+
+	public static final ByteBuffer EOF = ByteBuffer.allocateDirect(1);
+
+	private boolean pumpFramesInto() {
+		ByteBuffer rgbBuffer = emptyQueue.take();
 		if (metadata.width * metadata.height * 3 != rgbBuffer.remaining()) {
 			throw new IllegalArgumentException();
 		}
@@ -81,18 +118,21 @@ public class VideoStream implements Closeable {
 				videoStream.readFully(tmp2);
 				rgbBuffer.put(tmp2);
 			}
+			rgbBuffer.flip();
+			
+			filledQueue.put(rgbBuffer);
 
-			if (rgbBuffer.hasRemaining()) {
-				throw new IllegalStateException();
-			}
+			return true;
 		} catch (IOException exc) {
-			return null;
+			return false;
 		}
-		return rgbBuffer;
 	}
+
+	volatile boolean closed;
 
 	@Override
 	public void close() throws IOException {
+		this.closed = true;
 		this.videoStream.close();
 	}
 }

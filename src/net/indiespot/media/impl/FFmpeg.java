@@ -81,7 +81,7 @@ public class FFmpeg {
 			InputStream stderr = process.getErrorStream();
 			BufferedReader br = new BufferedReader(new InputStreamReader(stderr));
 			for (String line; (line = br.readLine()) != null;) {
-				System.out.println("ffmpeg: " + line);
+				//System.out.println("ffmpeg: " + line);
 
 				// Look for:
 				// "	Stream #0:0: Video: vp6f, yuv420p, 320x240, 314 kb/s, 30 tbr, 1k tbn, 1k tbc"
@@ -104,11 +104,11 @@ public class FFmpeg {
 		}
 	}
 
-	public static InputStream extractVideoAsRGB24(File srcMovieFile) throws IOException {
+	public static InputStream extractVideoAsRGB24(File srcMovieFile, int seconds) throws IOException {
 		return streamData(new ProcessBuilder().command(//
 		   FFMPEG_PATH, //
-		   "-i", srcMovieFile.getAbsolutePath(), //
-		   // "-ss", "00:05:00.00", //
+		   "-ss", String.valueOf(seconds), //
+		   "-i", srcMovieFile.getAbsolutePath(), //		   
 		   "-f", "rawvideo", //
 		   "-pix_fmt", "rgb24", //
 		   "-" //
@@ -117,13 +117,13 @@ public class FFmpeg {
 
 	//
 
-	public static InputStream extractAudioAsWAV(File srcMovieFile) throws IOException {
+	public static InputStream extractAudioAsWAV(File srcMovieFile, int seconds) throws IOException {
 		return streamData(new ProcessBuilder().command(//
 		   FFMPEG_PATH, //
+		   "-ss", String.valueOf(seconds), //
 		   "-i", srcMovieFile.getAbsolutePath(), //
 		   "-acodec", "pcm_s16le", //
-		   "-ac", "2", //
-		   // "-ss", "00:05:00.00", //
+		   "-ac", "2", //		    
 		   "-f", "wav", //
 		   "-" //
 		));

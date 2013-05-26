@@ -33,13 +33,7 @@ package net.indiespot.media.test;
 import static org.lwjgl.opengl.GL11.*;
 
 import java.io.File;
-import java.nio.ByteBuffer;
-
-import net.indiespot.media.AudioRenderer;
-import net.indiespot.media.Movie;
-import net.indiespot.media.impl.OpenALAudioRenderer;
-
-import org.lwjgl.BufferUtils;
+import net.indiespot.media.MoviePlayer;
 import org.lwjgl.LWJGLException;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
@@ -50,16 +44,13 @@ import org.lwjgl.opengl.PixelFormat;
 import org.lwjgl.util.glu.GLU;
 
 import craterstudio.math.EasyMath;
+import craterstudio.text.Text;
 import craterstudio.text.TextValues;
 
 public class TestGameLoop {
 	public static void main(String path) throws Exception {
 
 		final File movieFile = new File(path);
-		Movie movie = Movie.open(movieFile);
-
-		OpenALAudioRenderer audioRenderer = new OpenALAudioRenderer();
-		audioRenderer.init(movie.audioStream(), movie.framerate());
 
 		//
 
@@ -81,97 +72,80 @@ public class TestGameLoop {
 			}
 		}
 
-		// setup projection matrix
-		{
-			displayWidth = Display.getWidth();
-			displayHeight = Display.getHeight();
-			{
-				glMatrixMode(GL_PROJECTION);
-				glLoadIdentity();
-				GLU.gluPerspective(60.0f, displayWidth / (float) displayHeight, 0.01f, 100.0f);
-
-				glMatrixMode(GL_MODELVIEW);
-				glLoadIdentity();
-
-				glViewport(0, 0, displayWidth, displayHeight);
-			}
-		}
-
-		// create texture holding video frame
-		{
-			textureHandle = glGenTextures();
-			glBindTexture(GL_TEXTURE_2D, textureHandle);
-
-			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-			int wPot = EasyMath.fitInPowerOfTwo(movie.width());
-			int hPot = EasyMath.fitInPowerOfTwo(movie.height());
-			texWidthUsedRatio = (float) movie.width() / wPot;
-			texHeightUsedRatio = (float) movie.height() / hPot;
-
-			// 'tmpbuf' should be null, but some drivers are too buggy
-			ByteBuffer tmpbuf = BufferUtils.createByteBuffer(wPot * hPot * 3);
-			glTexImage2D(GL_TEXTURE_2D, 0/* level */, GL_RGB, wPot, hPot, 0/* border */, GL_RGB, GL_UNSIGNED_BYTE, tmpbuf);
-			tmpbuf = null;
-		}
+		MoviePlayer player = new MoviePlayer(movieFile);
 
 		// game loop
-
-		long textureReceiveTook = 0;
-		long textureUpdateTook = 0;
-		long textureRenderTook = 0;
 
 		long started = System.nanoTime();
 		long startedLastSecond = System.nanoTime();
 		int videoFramesLastSecond = 0;
 		int renderFramesLastSecond = 0;
 
+		boolean firstFrame = true;
 		while (!Display.isCloseRequested()) {
+			if (firstFrame || Display.wasResized()) {
+				firstFrame = false;
+
+				// setup projection matrix
+				displayWidth = Display.getWidth();
+				displayHeight = Display.getHeight();
+				{
+					glViewport(0, 0, displayWidth, displayHeight);
+				}
+			}
 
 			// handle input
 			{
 				while (Keyboard.next()) {
 					if (Keyboard.getEventKeyState()) { // on key press
 						if (Keyboard.getEventKey() == Keyboard.KEY_SPACE) {
-							if (audioRenderer.getState() == AudioRenderer.State.PLAYING) {
-								audioRenderer.pause();
-							} else if (audioRenderer.getState() == AudioRenderer.State.PAUSED) {
-								audioRenderer.resume();
+							if (player.isPlaying()) {
+								player.pause();
+							} else if (player.isPaused()) {
+								player.resume();
 							}
 						} else if (Keyboard.getEventKey() == Keyboard.KEY_ESCAPE) {
-							audioRenderer.stop();
+							player.stop();
+						} else if (Keyboard.getEventKey() == Keyboard.KEY_LEFT) {
+							player.relativeSeek(-10);
+						} else if (Keyboard.getEventKey() == Keyboard.KEY_RIGHT) {
+							player.relativeSeek(+10);
 						}
 					}
 				}
 
 				while (Mouse.next()) {
-					if (Mouse.getDWheel() != 0) { // on scrollwheel rotate
-						float volume = audioRenderer.getVolume();
-						volume += (Mouse.getDWheel() > 0) ? +0.1f : -0.1f;
+					int dwheel = Mouse.getDWheel();
+					if (dwheel != 0) { // on scrollwheel rotate
+						float volume = player.audio().getVolume();
+						volume += (dwheel > 0) ? +0.1f : -0.1f;
 						volume = EasyMath.clamp(volume, 0.0f, 1.0f);
-						audioRenderer.setVolume(volume);
+						player.audio().setVolume(volume);
 					}
 
 					if (Mouse.getEventButtonState()) { // on mouse-button press
-						if (audioRenderer.getState() == AudioRenderer.State.PLAYING) {
-							audioRenderer.pause();
-						} else if (audioRenderer.getState() == AudioRenderer.State.PAUSED) {
-							audioRenderer.resume();
+						if (player.isPlaying()) {
+							player.pause();
+						} else if (player.isPaused()) {
+							player.resume();
 						}
 					}
 				}
 			}
 
-			audioRenderer.tick(movie);
+			player.tick();
 
 			glClearColor(0, 0, 0, 1);
 			glClear(GL_COLOR_BUFFER_BIT);
 
+			boolean is3D = Keyboard.isKeyDown(Keyboard.KEY_LSHIFT);
+
 			// position camera, make it sway
-			{
+			if (is3D) {
+				glMatrixMode(GL_PROJECTION);
+				glLoadIdentity();
+				GLU.gluPerspective(60.0f, displayWidth / (float) displayHeight, 0.01f, 100.0f);
+
 				glMatrixMode(GL_MODELVIEW);
 				glLoadIdentity();
 
@@ -182,78 +156,99 @@ public class TestGameLoop {
 				glRotatef(-angle, 0, 1, 0);
 				glRotatef(-15f, 0, 0, 1); // look down
 				glTranslatef(-3, -1.7f, -0);
+			} else {
+				glMatrixMode(GL_PROJECTION);
+				glLoadIdentity();
+				glOrtho(0, displayWidth, displayHeight, 0, -1.0f, +1.0f);
+
+				glMatrixMode(GL_MODELVIEW);
+				glLoadIdentity();
 			}
 
 			glEnable(GL_TEXTURE_2D);
-			glBindTexture(GL_TEXTURE_2D, textureHandle);
 
-			if (movie.isTimeForNextFrame()) {
-				// grab the next frame from the video stream
-				textureReceiveTook = System.nanoTime();
-				textureBuffer = movie.videoStream().readFrameInto(textureBuffer);
-				textureReceiveTook = System.nanoTime() - textureReceiveTook;
-
-				if (textureBuffer == null) {
-					break;
-				}
-
-				textureUpdateTook = System.nanoTime();
-				glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, movie.width(), movie.height(), GL_RGB, GL_UNSIGNED_BYTE, textureBuffer);
-				textureUpdateTook = System.nanoTime() - textureUpdateTook;
-
-				// signal the AV-sync that we processed a frame
-				movie.onUpdatedVideoFrame();
-
-				videoFramesLastSecond++;
+			if (!player.syncTexture(5)) {
+				break;
 			}
 
 			// render scene
-			textureRenderTook = System.nanoTime();
+			long textureRenderTook = System.nanoTime();
 			{
 				glEnable(GL_BLEND);
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-				float h = (float) movie.height() / movie.width() * 2;
+				float h = (float) player.movie.height() / player.movie.width() * 2;
 
 				glPushMatrix();
 
-				glBegin(GL_QUADS);
-				{
+				if (is3D) {
+					glBegin(GL_QUADS);
+					{
+						glColor4f(1, 1, 1, 1);
+
+						// render movie screen
+
+						glTexCoord2f(0, 1);
+						glVertex3f(0, 0.1f + h * 0, +1);
+
+						glTexCoord2f(1, 1);
+						glVertex3f(0, 0.1f + h * 0, -1);
+
+						glTexCoord2f(1, 0);
+						glVertex3f(0, 0.1f + h * 1, -1);
+
+						glTexCoord2f(0, 0);
+						glVertex3f(0, 0.1f + h * 1, +1);
+
+						// radiosity / blur on the floor
+
+						for (int i = -15; i <= +15; i++) {
+							glColor4f(1, 1, 1, 0.025f);
+							glTexCoord2f(0, 1);
+							glVertex3f(0, 0, +1);
+
+							glTexCoord2f(1, 1);
+							glVertex3f(0, 0, -1);
+
+							glColor4f(1, 1, 1, 0.0f);
+							glTexCoord2f(1, 0);
+							glVertex3f(0, -0.5f * h + Math.abs(i) * 0.01f, -1 + (i * 4) * 0.01f);
+
+							glTexCoord2f(0, 0);
+							glVertex3f(0, -0.5f * h + Math.abs(i) * 0.01f, +1 + (i * 4) * 0.01f);
+						}
+					}
+					glEnd();
+				} else {
+					glBegin(GL_QUADS);
+
 					glColor4f(1, 1, 1, 1);
 
-					// render movie screen
+					// render flat screen
 
-					glTexCoord2f(0 * texWidthUsedRatio, 1 * texHeightUsedRatio);
-					glVertex3f(0, 0.1f + h * 0, +1);
+					float wRatio = (float) displayWidth / player.movie.width();
+					float hRatio = (float) displayHeight / player.movie.height();
+					float minRatio = Math.min(wRatio, hRatio);
 
-					glTexCoord2f(1 * texWidthUsedRatio, 1 * texHeightUsedRatio);
-					glVertex3f(0, 0.1f + h * 0, -1);
+					float wMovie = player.movie.width() * minRatio;
+					float hMovie = player.movie.height() * minRatio;
+					float xMovie = (displayWidth - wMovie) * 0.5f;
+					float yMovie = (displayHeight - hMovie) * 0.5f;
 
-					glTexCoord2f(1 * texWidthUsedRatio, 0 * texHeightUsedRatio);
-					glVertex3f(0, 0.1f + h * 1, -1);
+					glTexCoord2f(0, 0);
+					glVertex3f(xMovie + 0 * wMovie, yMovie + 0 * hMovie, 0);
 
-					glTexCoord2f(0 * texWidthUsedRatio, 0 * texHeightUsedRatio);
-					glVertex3f(0, 0.1f + h * 1, +1);
+					glTexCoord2f(1, 0);
+					glVertex3f(xMovie + 1 * wMovie, yMovie + 0 * hMovie, 0);
 
-					// radiosity / blur on the floor
+					glTexCoord2f(1, 1);
+					glVertex3f(xMovie + 1 * wMovie, yMovie + 1 * hMovie, 0);
 
-					for (int i = -15; i <= +15; i++) {
-						glColor4f(1, 1, 1, 0.025f);
-						glTexCoord2f(0 * texWidthUsedRatio, 1 * texHeightUsedRatio);
-						glVertex3f(0, 0, +1);
+					glTexCoord2f(0, 1);
+					glVertex3f(xMovie + 0 * wMovie, yMovie + 1 * hMovie, 0);
 
-						glTexCoord2f(1 * texWidthUsedRatio, 1 * texHeightUsedRatio);
-						glVertex3f(0, 0, -1);
-
-						glColor4f(1, 1, 1, 0.0f);
-						glTexCoord2f(1 * texWidthUsedRatio, 0 * texHeightUsedRatio);
-						glVertex3f(0, -0.5f * h + Math.abs(i) * 0.01f, -1 + (i * 4) * 0.01f);
-
-						glTexCoord2f(0 * texWidthUsedRatio, 0 * texHeightUsedRatio);
-						glVertex3f(0, -0.5f * h + Math.abs(i) * 0.01f, +1 + (i * 4) * 0.01f);
-					}
+					glEnd();
 				}
-				glEnd();
 				glDisable(GL_BLEND);
 				glDisable(GL_TEXTURE_2D);
 
@@ -266,25 +261,32 @@ public class TestGameLoop {
 			if (System.nanoTime() > startedLastSecond + 1_000_000_000L) {
 				startedLastSecond += 1_000_000_000L;
 
-				String a = TextValues.formatNumber(textureReceiveTook / 1_000_000.0, 1);
-				String b = TextValues.formatNumber(textureUpdateTook / 1_000_000.0, 1);
+				String b1 = TextValues.formatNumber(player.textureUpdateTook.min() / 1_000_000.0, 1);
+				String b2 = TextValues.formatNumber(player.textureUpdateTook.avg() / 1_000_000.0, 1);
+				String b3 = TextValues.formatNumber(player.textureUpdateTook.max() / 1_000_000.0, 1);
 				String c = TextValues.formatNumber(textureRenderTook / 1_000_000.0, 1);
+
+				b1 = Text.replace(b1, ',', '.');
+				b2 = Text.replace(b2, ',', '.');
+				b3 = Text.replace(b3, ',', '.');
+				c = Text.replace(c, ',', '.');
+
 				Display.setTitle(//
 				   "rendering " + renderFramesLastSecond + "fps, " + //
-				      "video " + videoFramesLastSecond + "fps, " + //
-				      "read blocking: " + a + "ms, " + //
-				      "texture update: " + b + "ms, " + //
+				      "video " + (player.textureUpdateTook.addCount() - videoFramesLastSecond) + "fps, " + //
+				      "texture update: [min: " + b1 + ", avg: " + b2 + ", max: " + b3 + "ms] " + //
 				      "rendering: " + c + "ms");
 
 				renderFramesLastSecond = 0;
-				videoFramesLastSecond = 0;
+				videoFramesLastSecond = player.textureUpdateTook.addCount();
 			}
 
 			Display.update();
+
+			Display.sync(60);
 		}
 
-		movie.close();
-		audioRenderer.close();
+		player.close();
 
 		Display.destroy();
 		AL.destroy();
@@ -294,10 +296,4 @@ public class TestGameLoop {
 
 	static int displayWidth;
 	static int displayHeight;
-
-	static int textureHandle;
-	static ByteBuffer textureBuffer;
-
-	static float texWidthUsedRatio;
-	static float texHeightUsedRatio;
 }

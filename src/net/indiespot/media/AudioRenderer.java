@@ -70,9 +70,11 @@ public abstract class AudioRenderer implements Closeable {
 			bufferDuo[i] = ByteBuffer.allocateDirect(samplesInBuffers[i] * (this.audioStream.numChannels + this.audioStream.bytesPerSample));
 		}
 
-		System.out.println("Audio metadata: " + this.audioStream.sampleRate() + "Hz, " //
-		   + this.audioStream.numChannels + " channels, " //
-		   + (this.audioStream.bytesPerSample * 8) + " bit / sample, " + this.audioStream.sampleCount + " samples");
+		if (false) {
+			System.out.println("Audio metadata: " + this.audioStream.sampleRate() + "Hz, " //
+			   + this.audioStream.numChannels + " channels, " //
+			   + (this.audioStream.bytesPerSample * 8) + " bit / sample, " + this.audioStream.sampleCount + " samples");
+		}
 
 		largest = new byte[Math.max(bufferDuo[0].capacity(), bufferDuo[1].capacity())];
 	}
@@ -103,8 +105,9 @@ public abstract class AudioRenderer implements Closeable {
 			bufferIndexList.removeLast();
 		}
 
-		System.out.println("Audio hourly sync error: " + TextValues.formatNumber(calcHourlyError(), 2) + "sec, using pattern of " + bufferIndexList.size() + " switches");
-
+		if (false) {
+			System.out.println("Audio hourly sync error: " + TextValues.formatNumber(calcHourlyError(), 2) + "sec, using pattern of " + bufferIndexList.size() + " switches");
+		}
 	}
 
 	private double calcHourlyError() {

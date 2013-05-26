@@ -34,9 +34,6 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ByteBuffer;
-
-import craterstudio.util.concur.SimpleBlockingQueue;
 
 import net.indiespot.media.impl.FFmpeg;
 import net.indiespot.media.impl.VideoMetadata;
@@ -44,15 +41,17 @@ import net.indiespot.media.impl.VideoMetadata;
 public class Movie implements Closeable {
 
 	public static Movie open(File movieFile) throws IOException {
+		return Movie.open(movieFile, 0);
+	}
+
+	public static Movie open(File movieFile, int seconds) throws IOException {
 		VideoMetadata metadata = FFmpeg.extractMetadata(movieFile);
 
-		InputStream rgb24Stream = FFmpeg.extractVideoAsRGB24(movieFile);
-		InputStream wav16Stream = FFmpeg.extractAudioAsWAV(movieFile);
+		InputStream rgb24Stream = FFmpeg.extractVideoAsRGB24(movieFile, seconds);
+		InputStream wav16Stream = FFmpeg.extractAudioAsWAV(movieFile, seconds);
 
 		AudioStream audioStream = new AudioStream(wav16Stream);
 		VideoStream videoStream = new VideoStream(rgb24Stream, metadata);
-
-		videoStream = new ThreadedVideoStream(videoStream, metadata, 3);
 
 		return new Movie(metadata, videoStream, audioStream);
 	}
@@ -112,6 +111,14 @@ public class Movie implements Closeable {
 	private int audioIndex;
 	private int videoIndex;
 
+	public int getVideoFrame() {
+		return videoIndex;
+	}
+
+	public float getPlayingTime() {
+		return this.getVideoFrame() / this.framerate();
+	}
+
 	public void onMissingAudio() {
 		audioIndex = AUDIO_UNAVAILABLE;
 	}
@@ -134,6 +141,22 @@ public class Movie implements Closeable {
 		this.videoIndex++;
 	}
 
+	public boolean hasVideoBacklogOver(int frameCount) {
+		switch (audioIndex) {
+			case AUDIO_TERMINATED:
+				// reached end of audio
+				return false;
+
+			case AUDIO_UNAVAILABLE:
+				// sync video with clock
+				return (videoIndex + frameCount) * frameInterval <= System.nanoTime() - initFrame;
+
+			default:
+				// sync video with audio
+				return (videoIndex + frameCount) <= audioIndex;
+		}
+	}
+
 	public boolean isTimeForNextFrame() {
 
 		switch (audioIndex) {
@@ -153,55 +176,7 @@ public class Movie implements Closeable {
 
 	@Override
 	public void close() throws IOException {
-		audioStream().close();
-		videoStream().close();
-	}
-}
-
-class ThreadedVideoStream extends VideoStream {
-	private final VideoStream backing;
-	private final SimpleBlockingQueue<ByteBuffer> emptyQueue, filledQueue;
-
-	public ThreadedVideoStream(final VideoStream backing, VideoMetadata metadata, int buffers) {
-		super(backing.videoStream, metadata);
-
-		this.backing = backing;
-		this.emptyQueue = new SimpleBlockingQueue<>();
-		this.filledQueue = new SimpleBlockingQueue<>();
-
-		for (int i = 0; i < buffers; i++) {
-			this.emptyQueue.put(ByteBuffer.allocateDirect(metadata.width * metadata.height * 3));
-		}
-
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				while (true) {
-					ByteBuffer rgbBuffer = emptyQueue.take();
-
-					rgbBuffer.clear();
-					if (backing.readFrameInto(rgbBuffer) == null) {
-						break;
-					}
-					rgbBuffer.flip();
-
-					filledQueue.put(rgbBuffer);
-				}
-
-				filledQueue.put(null);
-			}
-		}).start();
-	}
-
-	public ByteBuffer readFrameInto(ByteBuffer rgbBuffer) {
-		if (rgbBuffer != null) {
-			this.emptyQueue.put(rgbBuffer);
-		}
-		return this.filledQueue.take();
-	}
-
-	@Override
-	public void close() throws IOException {
-		this.backing.close();
+		audioStream.close();
+		videoStream.close();
 	}
 }
