@@ -50,7 +50,12 @@ public class Movie implements Closeable {
 		InputStream rgb24Stream = FFmpeg.extractVideoAsRGB24(movieFile, seconds);
 		InputStream wav16Stream = FFmpeg.extractAudioAsWAV(movieFile, seconds);
 
-		AudioStream audioStream = new AudioStream(wav16Stream);
+		AudioStream audioStream;
+		try {
+			audioStream = new AudioStream(wav16Stream);
+		} catch (IOException exc) {
+			audioStream = new AudioStream(); // no audio, feed in dummy samples
+		}
 		VideoStream videoStream = new VideoStream(rgb24Stream, metadata);
 
 		return new Movie(metadata, videoStream, audioStream);

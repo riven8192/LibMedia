@@ -1,7 +1,6 @@
 package net.indiespot.media;
 
 import static org.lwjgl.opengl.GL11.*;
-import static org.lwjgl.opengl.GL11.GL_REPEAT;
 import static org.lwjgl.opengl.GL11.GL_RGB;
 import static org.lwjgl.opengl.GL11.GL_TEXTURE_2D;
 import static org.lwjgl.opengl.GL11.GL_TEXTURE_MAG_FILTER;
@@ -18,17 +17,14 @@ import java.nio.ByteBuffer;
 import net.indiespot.media.AudioRenderer.State;
 import net.indiespot.media.impl.OpenALAudioRenderer;
 
-import org.lwjgl.BufferUtils;
-import org.lwjgl.opengl.GL12;
-
 import craterstudio.util.RunningAvg;
-import craterstudio.util.concur.SimpleBlockingQueue;
+import static org.lwjgl.opengl.ARBBufferObject.*;
+import static org.lwjgl.opengl.ARBPixelBufferObject.*;
 
 public class MoviePlayer {
 
 	public File movieFile;
 	public Movie movie;
-	public int textureHandle;
 	public OpenALAudioRenderer audioRenderer;
 
 	public MoviePlayer(File movieFile) throws IOException {
@@ -36,7 +32,21 @@ public class MoviePlayer {
 
 		movie = Movie.open(movieFile);
 
+		boolean usePBOs = true;
+		if (usePBOs) {
+			pboHandle = 0;
+		} else {
+			pboHandle = -1;
+		}
+
 		this.init();
+	}
+
+	public int textureHandle;
+	private int pboHandle;
+
+	private boolean usePBO() {
+		return pboHandle >= 0;
 	}
 
 	private void init() {
@@ -53,6 +63,13 @@ public class MoviePlayer {
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		glTexImage2D(GL_TEXTURE_2D, 0/* level */, GL_RGB, movie.width(), movie.height(), 0/* border */, GL_RGB, GL_UNSIGNED_BYTE, (ByteBuffer) null);
+
+		if (usePBO()) {
+			pboHandle = glGenBuffersARB();
+			glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pboHandle);
+			glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, movie.width() * movie.height() * 3, GL_STREAM_DRAW_ARB);
+			glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+		}
 	}
 
 	private int offsetInSeconds;
@@ -148,9 +165,25 @@ public class MoviePlayer {
 
 			{
 				long tStart = System.nanoTime();
-				glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, movie.width(), movie.height(), GL_RGB, GL_UNSIGNED_BYTE, texBuffer);
-				movie.videoStream().freeFrameData(texBuffer);
+
+				if (usePBO()) {
+					glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pboHandle);
+
+					ByteBuffer mapped = glMapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY_ARB, movie.width() * movie.height() * 3, null);
+					mapped.put(texBuffer);
+					glUnmapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB);
+
+					glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, movie.width(), movie.height(), GL_RGB, GL_UNSIGNED_BYTE, 0);
+
+					glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+				} else {
+					glTexSubImage2D(GL_TEXTURE_2D, 0/* level */, 0, 0, movie.width(), movie.height(), GL_RGB, GL_UNSIGNED_BYTE, texBuffer);
+				}
+
 				textureUpdateTook.add(System.nanoTime() - tStart);
+
+				movie.videoStream().freeFrameData(texBuffer);
+				texBuffer = null;
 			}
 
 			// signal the AV-sync that we processed a frame

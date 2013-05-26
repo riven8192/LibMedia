@@ -40,15 +40,39 @@ public class AudioStream implements Closeable {
 	public int numChannels;
 	public int sampleRate;
 	public int byteRate;
-	public int blockAlign;
+	private int blockAlign;
 	public int bytesPerSample;
 
 	public final DataInputStream input;
 	public int sampleCount;
 
+	public AudioStream() throws IOException {
+		this.input = new DataInputStream(new InputStream() {
+			@Override
+			public int read() throws IOException {
+				return 0;
+			}
+
+			@Override
+			public int available() throws IOException {
+				return 1;
+			}
+		});
+
+		this.numChannels = 2;
+		this.sampleRate = 44100;
+		this.blockAlign = 4;
+		this.bytesPerSample = 2;
+		this.byteRate = sampleRate * numChannels * bytesPerSample;
+	}
+
 	public AudioStream(InputStream input) throws IOException {
 		this.input = new DataInputStream(input);
 
+		this.initWAV();
+	}
+
+	private void initWAV() throws IOException {
 		while (true) {
 			String chunkName = readString(this.input, 4);
 			int chunkSize = swap32(this.input.readInt());
