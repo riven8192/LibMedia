@@ -1,4 +1,4 @@
 LibMedia
 ========
 
-Depends on LibBase
+Depends on LibBase repository
